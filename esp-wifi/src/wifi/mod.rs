@@ -1334,48 +1334,132 @@ impl<'d> WifiController<'d> {
     pub fn is_ap_enabled(&self) -> Result<bool, WifiError> {
         WifiMode::try_from(&self.config).map(|m| m.is_ap())
     }
+}
 
-    fn scan_result_count(&mut self) -> Result<usize, WifiError> {
-        let mut bss_total: u16 = 0;
+struct ScanResults {
+    count: usize,
+    guard: FreeApListOnDrop,
+}
 
-        // Prevents memory leak on error
-        let guard = FreeApListOnDrop;
+impl ScanResults {
+    pub fn new(guard: FreeApListOnDrop) -> Self {
+        let mut bss_total = 0;
 
-        unsafe { esp_wifi_result!(include::esp_wifi_scan_get_ap_num(&mut bss_total))? };
+        // `esp_wifi_scan_get_ap_num` shouldn't return an error. It's documentation lists state
+        // errors that would trip previous checks, and ESP_ERR_INVALID_ARG.
+        let count = esp_wifi_result!(unsafe { include::esp_wifi_scan_get_ap_num(&mut bss_total) })
+            .map(|_| bss_total as usize)
+            .unwrap_or(0);
 
-        guard.defuse();
-
-        Ok(bss_total as usize)
+        Self { count, guard }
     }
 
-    fn scan_results<const N: usize>(
-        &mut self,
-    ) -> Result<heapless::Vec<AccessPointInfo, N>, WifiError> {
-        let mut scanned = heapless::Vec::<AccessPointInfo, N>::new();
-        let mut bss_total: u16 = N as u16;
+    pub fn remaining(&self) -> usize {
+        self.count
+    }
 
-        let mut records: [MaybeUninit<include::wifi_ap_record_t>; N] = [MaybeUninit::uninit(); N];
-
-        // Prevents memory leak on error
-        let guard = FreeApListOnDrop;
-
-        unsafe {
-            esp_wifi_result!(include::esp_wifi_scan_get_ap_records(
-                &mut bss_total,
-                records[0].as_mut_ptr(),
-            ))?
-        };
-
-        guard.defuse();
-
-        for i in 0..bss_total {
-            let record = unsafe { MaybeUninit::assume_init_ref(&records[i as usize]) };
-            let ap_info = convert_ap_info(record);
-
-            scanned.push(ap_info).ok();
+    #[cfg(not(esp32c2))]
+    fn read_into<const N: usize>(
+        mut self,
+        scanned: &mut heapless::Vec<AccessPointInfo, N>,
+    ) -> Result<(), WifiError> {
+        while !scanned.is_full() {
+            if let Some(record) = self.next() {
+                // It is okay to ignore the result here, because we checked previously whether the
+                // vector is full.
+                _ = scanned.push(record?);
+            } else {
+                break;
+            }
         }
 
+        // We don't defuse the drop guard because we don't track if we read all results.
+        // Freeing the list here should be fine.
+
+        Ok(())
+    }
+
+    #[cfg(esp32c2)]
+    fn read_into<const N: usize>(
+        mut self,
+        scanned: &mut heapless::Vec<AccessPointInfo, N>,
+    ) -> Result<(), WifiError> {
+        let mut bss_total: u16 = N as u16;
+        let mut records: [MaybeUninit<crate::binary::include::wifi_ap_record_t>; N] =
+            [MaybeUninit::uninit(); N];
+
+        unsafe {
+            esp_wifi_result!(crate::binary::include::esp_wifi_scan_get_ap_records(
+                &mut bss_total,
+                records[0].as_mut_ptr(),
+            ))?;
+        }
+
+        for i in 0..(bss_total as usize).min(N) {
+            if !scanned.is_full() {
+                let record = unsafe { MaybeUninit::assume_init_ref(&records[i]) };
+                let ap_info = convert_ap_info(record);
+                scanned.push(ap_info).ok();
+            } else {
+                break;
+            }
+        }
+
+        // `esp_wifi_scan_get_ap_records` frees the whole list, regardless of how many records were
+        // actually returned.
+        self.guard.defuse();
+
+        Ok(())
+    }
+
+    pub fn take_results<const N: usize>(
+        self,
+    ) -> Result<heapless::Vec<AccessPointInfo, N>, WifiError> {
+        let mut scanned = heapless::Vec::<AccessPointInfo, N>::new();
+
+        self.read_into(&mut scanned)?;
+
         Ok(scanned)
+    }
+}
+
+#[cfg(not(esp32c2))]
+impl Iterator for ScanResults {
+    type Item = Result<AccessPointInfo, WifiError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        extern "C" {
+            fn esp_mesh_scan_get_ap_record(
+                ap_record: *mut include::wifi_ap_record_t,
+                buffer: *mut c_types::c_void,
+            ) -> include::esp_err_t;
+        }
+
+        if self.count == 0 {
+            return None;
+        }
+
+        self.count -= 1;
+
+        let mut record: MaybeUninit<include::wifi_ap_record_t> = MaybeUninit::uninit();
+
+        let result = unsafe {
+            esp_wifi_result!(esp_mesh_scan_get_ap_record(
+                record.as_mut_ptr(),
+                core::ptr::null_mut(),
+            ))
+        };
+
+        match result {
+            Ok(_) => {
+                let record = unsafe { MaybeUninit::assume_init_ref(&record) };
+                let ap_info = convert_ap_info(record);
+
+                Some(Ok(ap_info))
+            }
+
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
@@ -1603,10 +1687,12 @@ impl Wifi for WifiController<'_> {
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
         esp_wifi_result!(crate::wifi::wifi_start_scan(true, Default::default()))?;
 
-        let count = self.scan_result_count()?;
-        let result = self.scan_results()?;
+        let mut scan_result = ScanResults::new();
 
-        Ok((result, count))
+        let count = scan_result.remaining();
+        let ap_list = scan_result.take_results()?;
+
+        Ok((ap_list, count))
     }
 
     /// Get the currently used configuration.
@@ -1833,10 +1919,12 @@ mod asynch {
 
             guard.defuse();
 
-            let count = self.scan_result_count()?;
-            let result = self.scan_results()?;
+            let mut scan_result = ScanResults::new(guard);
 
-            Ok((result, count))
+            let count = scan_result.remaining();
+            let ap_list = scan_result.take_results()?;
+
+            Ok((ap_list, count))
         }
 
         /// Async version of [`embedded_svc::wifi::Wifi`]'s `start` method
