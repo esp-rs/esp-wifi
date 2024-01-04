@@ -1512,7 +1512,7 @@ pub(crate) fn esp_wifi_send_data(interface: wifi_interface_t, data: &mut [u8]) {
     let res = unsafe { esp_wifi_internal_tx(interface, ptr, len) };
 
     if res != 0 {
-        warn!("esp_wifi_internal_tx {}", res);
+        warn!("esp_wifi_internal_tx err 0x{:04X}", res);
         decrement_inflight_counter();
     } else {
         trace!("esp_wifi_internal_tx ok");
@@ -1550,42 +1550,41 @@ fn apply_ap_config(config: &AccessPointConfiguration) -> Result<(), WifiError> {
 }
 
 fn apply_sta_config(config: &ClientConfiguration) -> Result<(), WifiError> {
-    let mut cfg = wifi_config_t {
-        sta: wifi_sta_config_t {
-            ssid: [0; 32],
-            password: [0; 64],
-            scan_method: crate::CONFIG.scan_method,
-            bssid_set: config.bssid.is_some(),
-            bssid: match config.bssid {
-                Some(bssid_ref) => bssid_ref,
-                None => [0; 6],
-            },
-            channel: config.channel.unwrap_or(0),
-            listen_interval: crate::CONFIG.listen_interval,
-            sort_method: wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL,
-            threshold: wifi_scan_threshold_t {
-                rssi: -99,
-                authmode: config.auth_method.to_raw(),
-            },
-            pmf_cfg: wifi_pmf_config_t {
-                capable: true,
-                required: false,
-            },
-            sae_pwe_h2e: 3,
-            _bitfield_align_1: [0; 0],
-            _bitfield_1: __BindgenBitfieldUnit::new([0; 4]),
-            failure_retry_cnt: crate::CONFIG.failure_retry_cnt,
-            _bitfield_align_2: [0; 0],
-            _bitfield_2: __BindgenBitfieldUnit::new([0; 4]),
-            sae_pk_mode: 0, // ??
-            sae_h2e_identifier: [0; 32],
+    let mut sta_config = wifi_sta_config_t {
+        ssid: [0; 32],
+        password: [0; 64],
+        scan_method: crate::CONFIG.scan_method,
+        bssid_set: config.bssid.is_some(),
+        bssid: match config.bssid {
+            Some(bssid_ref) => bssid_ref,
+            None => [0; 6],
         },
+        channel: config.channel.unwrap_or(0),
+        listen_interval: crate::CONFIG.listen_interval,
+        sort_method: wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL,
+        threshold: wifi_scan_threshold_t {
+            rssi: -99,
+            authmode: config.auth_method.to_raw(),
+        },
+        pmf_cfg: wifi_pmf_config_t {
+            capable: true,
+            required: false,
+        },
+        sae_pwe_h2e: 3,
+        _bitfield_align_1: [0; 0],
+        _bitfield_1: __BindgenBitfieldUnit::new([0; 4]),
+        failure_retry_cnt: crate::CONFIG.failure_retry_cnt,
+        _bitfield_align_2: [0; 0],
+        _bitfield_2: __BindgenBitfieldUnit::new([0; 4]),
+        sae_pk_mode: 0, // ??
+        sae_h2e_identifier: [0; 32],
     };
 
-    unsafe {
-        cfg.sta.ssid[0..(config.ssid.len())].copy_from_slice(config.ssid.as_bytes());
-        cfg.sta.password[0..(config.password.len())].copy_from_slice(config.password.as_bytes());
+    sta_config.ssid[0..(config.ssid.len())].copy_from_slice(config.ssid.as_bytes());
+    sta_config.password[0..(config.password.len())].copy_from_slice(config.password.as_bytes());
 
+    unsafe {
+        let mut cfg = wifi_config_t { sta: sta_config };
         esp_wifi_result!(esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut cfg))
     }
 }

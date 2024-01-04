@@ -2,7 +2,10 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use embassy_net::tcp::TcpSocket;
+use embassy_net::{
+    tcp::TcpSocket,
+    udp::{PacketMetadata, UdpSocket},
+};
 use embassy_net::{
     Config, IpListenEndpoint, Ipv4Address, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
 };
@@ -11,6 +14,7 @@ mod examples_util;
 use examples_util::hal;
 
 use embassy_executor::Spawner;
+use embassy_futures::yield_now;
 use embassy_time::{Duration, Timer};
 use embedded_svc::wifi::{AccessPointConfiguration, Configuration, Wifi};
 use esp_backtrace as _;
@@ -64,50 +68,64 @@ async fn main(spawner: Spawner) -> ! {
     let stack = &*make_static!(Stack::new(
         wifi_interface,
         config,
-        make_static!(StackResources::<3>::new()),
+        make_static!(StackResources::<7>::new()),
         seed
     ));
 
-    spawner.spawn(connection(controller)).ok();
-    spawner.spawn(net_task(&stack)).ok();
-
-    let mut rx_buffer = [0; 1536];
-    let mut tx_buffer = [0; 1536];
+    spawner.must_spawn(connection(controller));
+    spawner.must_spawn(net_task(&stack));
 
     loop {
         if stack.is_link_up() {
             break;
         }
-        Timer::after(Duration::from_millis(500)).await;
+        yield_now().await;
     }
-    println!("Connect to the AP `esp-wifi` and point your browser to http://192.168.2.1:8080/");
-    println!("Use a static IP in the range 192.168.2.2 .. 192.168.2.255, use gateway 192.168.2.1");
+
+    spawner.must_spawn(dhcp_server(&stack));
+    spawner.must_spawn(dns_server(&stack));
+    spawner.must_spawn(web_server(&stack, 1));
+    spawner.must_spawn(web_server(&stack, 2));
+    spawner.must_spawn(web_server(&stack, 3));
+
+    loop {
+        Timer::after(Duration::from_millis(10000)).await;
+    }
+}
+
+#[embassy_executor::task(pool_size = 3)]
+async fn web_server(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>, id: u8) {
+    log::info!("Web server {id} starting…");
+
+    let mut rx_buffer = [0; 2048];
+    let mut tx_buffer = [0; 2048];
 
     let mut socket = TcpSocket::new(&stack, &mut rx_buffer, &mut tx_buffer);
     socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
+
     loop {
-        println!("Wait for connection...");
+        log::info!("Web server {id} waiting for HTTP connection…");
         let r = socket
             .accept(IpListenEndpoint {
                 addr: None,
-                port: 8080,
+                port: 80,
             })
             .await;
-        println!("Connected...");
+        log::info!("Web server {id} connected.");
 
         if let Err(e) = r {
-            println!("connect error: {:?}", e);
+            log::error!("Web server {id} connect error: {:?}", e);
             continue;
         }
 
         use embedded_io_async::Write;
 
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 2048];
         let mut pos = 0;
         loop {
             match socket.read(&mut buffer).await {
                 Ok(0) => {
-                    println!("read EOF");
+                    log::info!("Web server {id} read EOF.");
                     break;
                 }
                 Ok(len) => {
@@ -123,44 +141,254 @@ async fn main(spawner: Spawner) -> ! {
                     pos += len;
                 }
                 Err(e) => {
-                    println!("read error: {:?}", e);
+                    log::error!("Web server {id} read error: {:?}", e);
                     break;
                 }
             };
         }
 
+        log::info!("Web server {id} got HTTP request, sending response.");
+
         let r = socket
             .write_all(
                 b"HTTP/1.0 200 OK\r\n\r\n\
-            <html>\
-                <body>\
-                    <h1>Hello Rust! Hello esp-wifi!</h1>\
-                </body>\
-            </html>\r\n\
-            ",
+          <html>\
+            <meta charset='utf-8'>\
+            <meta name='viewport' content='width=device-width, initial-scale=1, shrink-to-fit=no'>\
+            <body>\
+              <h1>Hello Rust!<br>Hello <code>esp-wifi</code>!</h1>\
+              <a href='.'>RELOAD</a>\
+            </body>\
+          </html>\r\n\
+          ",
             )
             .await;
         if let Err(e) = r {
-            println!("write error: {:?}", e);
+            log::error!("Web server {id} write error: {:?}", e);
         }
 
-        let r = socket.flush().await;
-        if let Err(e) = r {
-            println!("flush error: {:?}", e);
-        }
-        Timer::after(Duration::from_millis(1000)).await;
-
+        log::info!("Web server {id} closing socket.");
         socket.close();
-        Timer::after(Duration::from_millis(1000)).await;
 
+        log::info!("Web server {id} flushing socket.");
+        if let Err(e) = socket.flush().await {
+            log::error!("Web server {id} flush error: {:?}", e);
+        }
+
+        log::info!("Web server {id} aborting socket.");
         socket.abort();
     }
 }
 
 #[embassy_executor::task]
+async fn dhcp_server(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    log::info!("DHCP server starting…");
+
+    let mut rx_meta = [PacketMetadata::EMPTY; 1];
+    let mut rx_buffer = [0; 1500];
+    let mut tx_meta = [PacketMetadata::EMPTY; 1];
+    let mut tx_buffer = [0; 1500];
+    let mut socket = UdpSocket::new(
+        &stack,
+        &mut rx_meta,
+        &mut rx_buffer,
+        &mut tx_meta,
+        &mut tx_buffer,
+    );
+    socket
+        .bind(IpListenEndpoint {
+            addr: None,
+            port: 67,
+        })
+        .unwrap();
+    log::info!("DHCP server bound to port 67.");
+
+    let mut server: edge_dhcp::server::Server<10> = edge_dhcp::server::Server {
+        range_start: edge_dhcp::Ipv4Addr::new(192, 168, 2, 2),
+        range_end: edge_dhcp::Ipv4Addr::new(192, 168, 2, 254),
+        leases: Default::default(),
+    };
+
+    let server_options = edge_dhcp::server::ServerOptions {
+        ip: edge_dhcp::Ipv4Addr::new(192, 168, 2, 1),
+        gateways: &[edge_dhcp::Ipv4Addr::new(192, 168, 2, 1)],
+        subnet: Some(edge_dhcp::Ipv4Addr::new(255, 255, 255, 0)),
+        dns: &[edge_dhcp::Ipv4Addr::new(192, 168, 2, 1)],
+        lease_duration_secs: 7200,
+    };
+
+    loop {
+        let mut buf = [0; 1500];
+        match socket.recv_from(&mut buf).await {
+            Ok((size, _)) => {
+                log::info!("DHCP packet size: {size}");
+
+                let request = match edge_dhcp::Packet::decode(&buf[..size]) {
+                    Ok(packet) => packet,
+                    Err(err) => {
+                        log::error!("Invalid DHCP packet: {err:?}");
+                        continue;
+                    }
+                };
+
+                // log::info!("Received DHCP request from {endpoint:?}:\n{:?}", request);
+                //
+                // log::info!("Options:");
+                // for option in request.options.iter() {
+                //   println!("{option:?}");
+                // }
+
+                let mut dhcp_options_buf = edge_dhcp::Options::buf();
+
+                if let Some(response) =
+                    server.handle_request(&mut dhcp_options_buf, &server_options, &request)
+                {
+                    // According to RFC 2131, section 4.1.
+                    let response_endpoint = if !request.giaddr.is_unspecified() {
+                        embassy_net::IpEndpoint {
+                            addr: embassy_net::IpAddress::Ipv4(embassy_net::Ipv4Address(
+                                request.giaddr.octets(),
+                            )),
+                            port: 67,
+                        }
+                    } else {
+                        let is_nak = {
+                            let mut is_nak = false;
+
+                            for o in request.options.iter() {
+                                if matches!(
+                                    o,
+                                    edge_dhcp::DhcpOption::MessageType(edge_dhcp::MessageType::Nak)
+                                ) {
+                                    is_nak = true;
+                                    break;
+                                }
+                            }
+
+                            is_nak
+                        };
+
+                        if is_nak {
+                            embassy_net::IpEndpoint {
+                                addr: embassy_net::IpAddress::Ipv4(
+                                    embassy_net::Ipv4Address::BROADCAST,
+                                ),
+                                port: 68,
+                            }
+                        } else if !request.ciaddr.is_unspecified() {
+                            embassy_net::IpEndpoint {
+                                addr: embassy_net::IpAddress::Ipv4(embassy_net::Ipv4Address(
+                                    request.ciaddr.octets(),
+                                )),
+                                port: 68,
+                            }
+                        } else if request.broadcast {
+                            embassy_net::IpEndpoint {
+                                addr: embassy_net::IpAddress::Ipv4(
+                                    embassy_net::Ipv4Address::BROADCAST,
+                                ),
+                                port: 68,
+                            }
+                        } else {
+                            embassy_net::IpEndpoint {
+                                // FIXME: Unicast doesn't seem to work. How could it if the client doesn't have an IP yet?
+                                // addr: embassy_net::IpAddress::Ipv4(embassy_net::Ipv4Address(response.yiaddr.octets())),
+                                addr: embassy_net::IpAddress::Ipv4(
+                                    embassy_net::Ipv4Address::BROADCAST,
+                                ),
+                                port: 68,
+                            }
+                        }
+                    };
+
+                    println!("Sending DHCP response to {response_endpoint}.");
+                    //
+                    // println!("Options:");
+                    // for option in response.options.iter() {
+                    //   println!("{option:?}");
+                    // }
+
+                    let response_bytes = match response.encode(&mut buf) {
+                        Ok(response) => response,
+                        Err(err) => {
+                            log::error!("Failed to encode DHCP response: {err:?}");
+                            continue;
+                        }
+                    };
+
+                    match socket.send_to(response_bytes, response_endpoint).await {
+                        Ok(()) => (),
+                        Err(err) => log::error!("Error sending response: {err:?}"),
+                    }
+                }
+            }
+            Err(err) => {
+                log::error!("Failed to receive packet: {err:?}");
+            }
+        };
+    }
+}
+
+#[embassy_executor::task]
+async fn dns_server(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    log::info!("Starting DNS server…");
+
+    let mut rx_meta = [PacketMetadata::EMPTY; 1];
+    let mut rx_buffer = [0; 512];
+    let mut tx_meta = [PacketMetadata::EMPTY; 1];
+    let mut tx_buffer = [0; 512];
+    let mut socket = UdpSocket::new(
+        &stack,
+        &mut rx_meta,
+        &mut rx_buffer,
+        &mut tx_meta,
+        &mut tx_buffer,
+    );
+    socket
+        .bind(IpListenEndpoint {
+            addr: None,
+            port: 53,
+        })
+        .unwrap();
+    log::info!("DNS server bound to port 53.");
+
+    loop {
+        let mut buf = [0; 512];
+        match socket.recv_from(&mut buf).await {
+            Ok((size, endpoint)) => {
+                log::info!("DNS packet size: {size}");
+
+                let request = &buf[..size];
+
+                log::info!("Received DNS request from {endpoint:?}: {:?}", request);
+                let response = match edge_captive::process_dns_request(
+                    request,
+                    &[192, 168, 2, 1],
+                    core::time::Duration::from_secs(30),
+                ) {
+                    Ok(response) => response,
+                    Err(err) => {
+                        log::error!("Failed to process DNS request: {err}");
+                        continue;
+                    }
+                };
+
+                match socket.send_to(response.as_ref(), endpoint).await {
+                    Ok(()) => (),
+                    Err(err) => log::error!("Error sending response: {err:?}"),
+                }
+            }
+            Err(err) => {
+                log::error!("Failed to receive packet: {err:?}");
+            }
+        };
+    }
+}
+
+#[embassy_executor::task]
 async fn connection(mut controller: WifiController<'static>) {
-    println!("start connection task");
-    println!("Device capabilities: {:?}", controller.get_capabilities());
+    log::info!("Starting connection task.");
+    log::info!("Device capabilities: {:?}", controller.get_capabilities());
     loop {
         match esp_wifi::wifi::get_wifi_state() {
             WifiState::ApStarted => {
@@ -176,14 +404,15 @@ async fn connection(mut controller: WifiController<'static>) {
                 ..Default::default()
             });
             controller.set_configuration(&client_config).unwrap();
-            println!("Starting wifi");
+            log::info!("Starting WiFi…");
             controller.start().await.unwrap();
-            println!("Wifi started!");
+            log::info!("WiFi started.");
         }
     }
 }
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    log::info!("Initializing network stack.");
     stack.run().await
 }

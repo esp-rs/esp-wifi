@@ -60,3 +60,6 @@ rustflags = [
 
 [unstable]
 build-std = [ "core" ]
+
+[env]
+ESPFLASH_PORT = "/dev/cu.wchusbserial1440"

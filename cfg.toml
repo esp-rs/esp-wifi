@@ -1,0 +1,4 @@
+[esp-wifi]
+country_code = "AT"
+heap_size = 100000
+tx_queue_size = 5

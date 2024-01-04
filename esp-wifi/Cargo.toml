@@ -51,6 +51,8 @@ libm.workspace = true
 cfg-if.workspace = true
 portable-atomic.workspace = true
 portable_atomic_enum.workspace = true
+edge-dhcp = { workspace = true, optional = true }
+edge-captive = { workspace = true, optional = true }
 
 # We don't use these directly but we need to enable portable-atomic on them
 futures-util.workspace = true
