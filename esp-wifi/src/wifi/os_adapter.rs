@@ -892,7 +892,18 @@ pub unsafe extern "C" fn event_post(
  *
  ****************************************************************************/
 pub unsafe extern "C" fn get_free_heap_size() -> u32 {
-    critical_section::with(|cs| crate::HEAP.borrow_ref(cs).free() as u32)
+    #[cfg(not(feature = "alloc"))]
+    let size = critical_section::with(|cs| crate::HEAP.borrow_ref(cs).free() as u32);
+
+    #[cfg(feature = "alloc")]
+    let size = {
+        extern "Rust" {
+            fn esp_wifi_get_free_heap_size() -> u32;
+        }
+        esp_wifi_get_free_heap_size()
+    };
+
+    size
 }
 
 /****************************************************************************

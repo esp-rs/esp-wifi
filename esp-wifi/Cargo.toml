@@ -70,7 +70,8 @@ log.workspace = true
 static_cell.workspace = true
 
 [features]
-default = [ "log", "ipv4", "tcp", "udp", "icmp", "igmp", "dns", "dhcpv4" ]
+default = ["log", "ipv4", "tcp", "udp", "icmp", "igmp", "dns", "dhcpv4" ]
+alloc = []
 
 # chip features
 esp32c2 = [ "esp32c2-hal", "esp-wifi-sys/esp32c2", "esp-println/esp32c2", "esp-backtrace/esp32c2" ]

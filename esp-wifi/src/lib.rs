@@ -6,13 +6,19 @@
 #![doc = include_str!("../README.md")]
 #![doc(html_logo_url = "https://avatars.githubusercontent.com/u/46717278")]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 // MUST be the first module
 mod fmt;
 
+#[cfg(not(feature = "alloc"))]
 use core::cell::RefCell;
+#[cfg(not(feature = "alloc"))]
 use core::mem::MaybeUninit;
 
 use common_adapter::RADIO_CLOCKS;
+#[cfg(not(feature = "alloc"))]
 use critical_section::Mutex;
 
 #[cfg(esp32)]
@@ -38,6 +44,7 @@ use hal::system::RadioClockController;
 
 use fugit::MegahertzU32;
 use hal::clock::Clocks;
+#[cfg(not(feature = "alloc"))]
 use linked_list_allocator::Heap;
 #[cfg(feature = "wifi")]
 use wifi::WifiError;
@@ -71,6 +78,7 @@ pub mod tasks;
 
 pub(crate) mod memory_fence;
 
+#[cfg(not(feature = "alloc"))]
 use critical_section;
 use timer::{get_systimer_count, ticks_to_millis};
 
@@ -139,13 +147,17 @@ struct Config {
     scan_method: u32,
 }
 
+#[cfg(not(feature = "alloc"))]
 const HEAP_SIZE: usize = crate::CONFIG.heap_size;
 
+#[cfg(not(feature = "alloc"))]
 #[cfg_attr(esp32, link_section = ".dram2_uninit")]
 static mut HEAP_DATA: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
+#[cfg(not(feature = "alloc"))]
 pub(crate) static HEAP: Mutex<RefCell<Heap>> = Mutex::new(RefCell::new(Heap::empty()));
 
+#[cfg(not(feature = "alloc"))]
 fn init_heap() {
     critical_section::with(|cs| {
         HEAP.borrow_ref_mut(cs)
@@ -269,6 +281,7 @@ pub fn initialize(
 
     crate::common_adapter::chip_specific::enable_wifi_power_domain();
 
+    #[cfg(not(feature = "alloc"))]
     init_heap();
     phy_mem_init();
     init_radio_clock_control(radio_clocks);

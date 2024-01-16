@@ -38,7 +38,7 @@ pub fn current_task() -> usize {
 }
 
 #[cfg(coex)]
-task_stack!(8192, 8192, 8192);
+task_stack!(16384, 16384, 16384);
 
 #[cfg(not(coex))]
 task_stack!(8192, 8192);
