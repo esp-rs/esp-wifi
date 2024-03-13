@@ -62,6 +62,12 @@ async fn main(_spawner: Spawner) -> ! {
                             encrypt: false,
                         })
                         .unwrap();
+
+                    let r = esp_now.set_peer_rate(
+                        &r.info.src_address,
+                        esp_wifi::esp_now::WifiPhyRate::RateMcs7Sgi,
+                    );
+                    println!("set_peer_rate: {r:?}");
                 }
                 let status = esp_now.send_async(&r.info.src_address, b"Hello Peer").await;
                 println!("Send hello to peer status: {:?}", status);

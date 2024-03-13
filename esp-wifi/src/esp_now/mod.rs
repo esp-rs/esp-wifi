@@ -409,6 +409,55 @@ impl<'d> EspNowManager<'d> {
     pub fn set_rate(&self, rate: WifiPhyRate) -> Result<(), EspNowError> {
         check_error!({ esp_wifi_config_espnow_rate(wifi_interface_t_WIFI_IF_STA, rate as u32,) })
     }
+
+    ///
+    pub fn set_peer_rate(
+        &self,
+        peer_address: &[u8; 6],
+        rate: WifiPhyRate,
+    ) -> Result<(), EspNowError> {
+        let mut config = esp_now_rate_config_t {
+            phymode: wifi_phy_mode_t_WIFI_PHY_MODE_HT40,
+            rate: rate as u32,
+            // https://github.com/espressif/esp-idf/issues/12216
+            ersu: false,
+            dcm: false,
+        };
+
+        // let mut bw: u32 = 0;
+        // check_error!({ esp_wifi_get_bandwidth(wifi_interface_t_WIFI_IF_STA, &mut bw) })?;
+        // log::info!("bw: {bw}");
+
+        // https://github.com/espressif/esp-idf/blob/master/examples/wifi/iperf/main/cmd_wifi.c#L251
+        log::info!("Setting protocol.");
+        check_error!({
+            esp_wifi_set_protocol(
+                wifi_interface_t_WIFI_IF_STA,
+                (WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N) as u8,
+            )
+        })?;
+
+        log::info!("Setting bandwidth.");
+        check_error!({
+            esp_wifi_set_bandwidth(wifi_interface_t_WIFI_IF_STA, wifi_bandwidth_t_WIFI_BW_HT40)
+        })?;
+
+        let mut primary = 0;
+        let mut second = 0;
+        check_error!({ esp_wifi_get_channel(&mut primary, &mut second) })?;
+        log::info!("Channel: {primary} {second}");
+
+        log::info!("Setting channel.");
+        check_error!({ esp_wifi_set_channel(primary, wifi_second_chan_t_WIFI_SECOND_CHAN_ABOVE) })?;
+
+        log::info!("Setting peer rate.");
+        check_error!({
+            esp_now_set_peer_rate_config(
+                peer_address.as_ptr(),
+                (&mut config) as *mut esp_now_rate_config_t,
+            )
+        })
+    }
 }
 
 /// This is the sender part of ESP-NOW. You can get this sender by splitting
@@ -689,7 +738,13 @@ impl<'d> EspNow<'d> {
     pub fn set_rate(&self, rate: WifiPhyRate) -> Result<(), EspNowError> {
         self.manager.set_rate(rate)
     }
-
+    pub fn set_peer_rate(
+        &self,
+        peer_address: &[u8; 6],
+        rate: WifiPhyRate,
+    ) -> Result<(), EspNowError> {
+        self.manager.set_peer_rate(peer_address, rate)
+    }
     /// Send data to peer
     ///
     /// The peer needs to be added to the peer list first.
