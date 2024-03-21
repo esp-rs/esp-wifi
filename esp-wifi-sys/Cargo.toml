@@ -38,5 +38,8 @@ esp32h2 = []
 esp32s2 = []
 esp32s3 = []
 
+# Don't include libwpa_supplicant.a
+no-supplicant = []
+
 [package.metadata.docs.rs]
 features = ["esp32c3"]

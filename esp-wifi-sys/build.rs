@@ -83,6 +83,7 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32/librtc.a", "librtc.a")?;
     copy_file(out, "libs/esp32/libsmartconfig.a", "libsmartconfig.a")?;
     copy_file(out, "libs/esp32/libwapi.a", "libwapi.a")?;
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(out, "libs/esp32/libwpa_supplicant.a", "libwpa_supplicant.a")?;
 
     println!("cargo:rustc-link-lib={}", "btdm_app");
@@ -96,6 +97,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "rtc");
     println!("cargo:rustc-link-lib={}", "smartconfig");
     println!("cargo:rustc-link-lib={}", "wapi");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -112,6 +115,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32c2/libphy.a", "libphy.a")?;
     copy_file(out, "libs/esp32c2/libpp.a", "libpp.a")?;
     copy_file(out, "libs/esp32c2/libsmartconfig.a", "libsmartconfig.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32c2/libwpa_supplicant.a",
@@ -127,6 +132,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "phy");
     println!("cargo:rustc-link-lib={}", "pp");
     println!("cargo:rustc-link-lib={}", "smartconfig");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -145,6 +152,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32c3/libpp.a", "libpp.a")?;
     copy_file(out, "libs/esp32c3/libsmartconfig.a", "libsmartconfig.a")?;
     copy_file(out, "libs/esp32c3/libwapi.a", "libwapi.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32c3/libwpa_supplicant.a",
@@ -162,6 +171,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "pp");
     println!("cargo:rustc-link-lib={}", "smartconfig");
     println!("cargo:rustc-link-lib={}", "wapi");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -180,6 +191,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32c6/libpp.a", "libpp.a")?;
     copy_file(out, "libs/esp32c6/libsmartconfig.a", "libsmartconfig.a")?;
     copy_file(out, "libs/esp32c6/libwapi.a", "libwapi.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32c6/libwpa_supplicant.a",
@@ -197,6 +210,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "pp");
     println!("cargo:rustc-link-lib={}", "smartconfig");
     println!("cargo:rustc-link-lib={}", "wapi");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -208,6 +223,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32h2/libbtbb.a", "libbtbb.a")?;
     copy_file(out, "libs/esp32h2/libcoexist.a", "libcoexist.a")?;
     copy_file(out, "libs/esp32h2/libphy.a", "libphy.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32h2/libwpa_supplicant.a",
@@ -217,6 +234,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "ble_app");
     println!("cargo:rustc-link-lib={}", "btbb");
     println!("cargo:rustc-link-lib={}", "phy");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -234,6 +253,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32s2/libpp.a", "libpp.a")?;
     copy_file(out, "libs/esp32s2/libsmartconfig.a", "libsmartconfig.a")?;
     copy_file(out, "libs/esp32s2/libwapi.a", "libwapi.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32s2/libwpa_supplicant.a",
@@ -249,6 +270,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "pp");
     println!("cargo:rustc-link-lib={}", "smartconfig");
     println!("cargo:rustc-link-lib={}", "wapi");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
@@ -268,6 +291,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     copy_file(out, "libs/esp32s3/libpp.a", "libpp.a")?;
     copy_file(out, "libs/esp32s3/libsmartconfig.a", "libsmartconfig.a")?;
     copy_file(out, "libs/esp32s3/libwapi.a", "libwapi.a")?;
+
+    #[cfg(not(feature = "no-supplicant"))]
     copy_file(
         out,
         "libs/esp32s3/libwpa_supplicant.a",
@@ -285,6 +310,8 @@ fn copy_libraries(out: &PathBuf) -> Result<()> {
     println!("cargo:rustc-link-lib={}", "pp");
     println!("cargo:rustc-link-lib={}", "smartconfig");
     println!("cargo:rustc-link-lib={}", "wapi");
+
+    #[cfg(not(feature = "no-supplicant"))]
     println!("cargo:rustc-link-lib={}", "wpa_supplicant");
 
     Ok(())
